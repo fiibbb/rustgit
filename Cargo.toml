@@ -4,3 +4,5 @@ version = "0.1.0"
 authors = ["Ling Yuan <lingy@uber.com>"]
 
 [dependencies]
+flate2 = "1.0"
+sha1 = "0.6.0"
