@@ -7,19 +7,6 @@ pub struct Hash {
     hash: [u8;20]
 }
 
-impl Hash {
-    pub fn new(data: &Vec<u8>) -> Hash {
-        Hash {
-            hash: sha1::Sha1::from(data).digest().bytes()
-        }
-    }
-
-    pub fn hex_string(&self) -> String {
-        let s: Vec<String> = self.hash.iter().map(|b| format!("{:02x}", b)).collect();
-        s.connect("")
-    }
-}
-
 #[derive(Debug)]
 pub enum Type {
     Blob,
@@ -33,46 +20,53 @@ pub struct Header {
     size: usize,
 }
 
-pub fn get_header(data: &Vec<u8>) -> Result<Header, &str> {
-    let raw_header: Vec<u8> = data.iter().take_while(|b| **b != 0u8).map(|b| *b).collect();
-    if raw_header[0..4] == *b"tree" {
-        let size = from_utf8(&raw_header[5..]).unwrap().parse::<usize>().unwrap();
-        return Ok(Header {
-            typp: Type::Tree,
-            size: size,
-        });
-    } else if raw_header[0..4] == *b"blob" {
-        let size = from_utf8(&raw_header[5..]).unwrap().parse::<usize>().unwrap();
-        return Ok(Header {
-            typp: Type::Blob,
-            size: size,
-        });
-    } else if raw_header[0..6] == *b"commit" {
-        let size = from_utf8(&raw_header[7..]).unwrap().parse::<usize>().unwrap();
-        return Ok(Header {
-            typp: Type::Commit,
-            size: size,
-        });
-    } else {
-        return Err("unrecognized header");
-    }
-}
-
 pub trait Object {
     fn hash(&self) -> Hash;
 }
 
+#[derive(Debug)]
 pub struct Blob {
     raw: Vec<u8>,
     size: usize,
 }
 
-impl Blob {
-    fn new(data: Vec<u8>) -> Blob {
-        Blob {
-            raw: data,
-            size: 0,
+#[derive(Debug)]
+pub enum TreeEntryType {
+    Blob,
+    Tree,
+}
+
+#[derive(Debug)]
+pub struct TreeEntry {
+    mode: String,
+    typp: TreeEntryType,
+    hash: Hash,
+    name: String,
+}
+
+#[derive(Debug)]
+pub struct Tree {
+    raw: Vec<u8>,
+    size: usize,
+    entries: Vec<TreeEntry>,
+}
+
+#[derive(Debug)]
+pub struct Commit {
+    raw: Vec<u8>,
+    size: usize,
+}
+
+impl Hash {
+    pub fn new(data: &Vec<u8>) -> Hash {
+        Hash {
+            hash: sha1::Sha1::from(data).digest().bytes()
         }
+    }
+
+    pub fn hex_string(&self) -> String {
+        let s: Vec<String> = self.hash.iter().map(|b| format!("{:02x}", b)).collect();
+        s.join("")
     }
 }
 
@@ -82,51 +76,9 @@ impl Object for Blob {
     }
 }
 
-pub enum TreeEntryType {
-    Blob,
-    Tree,
-}
-
-pub struct TreeEntry {
-    mode: String,
-    typp: TreeEntryType,
-    hash: Hash,
-    name: String,
-}
-
-pub struct Tree {
-    raw: Vec<u8>,
-    size: usize,
-    entries: Vec<TreeEntry>,
-}
-
-impl Tree {
-    fn new(data: Vec<u8>) -> Tree {
-        Tree {
-            raw: data,
-            size: 0,
-            entries: Vec::new(),
-        }
-    }
-}
-
 impl Object for Tree {
     fn hash(&self) -> Hash {
         Hash::new(&self.raw)
-    }
-}
-
-pub struct Commit {
-    raw: Vec<u8>,
-    size: usize,
-}
-
-impl Commit {
-    fn new(data: Vec<u8>) -> Commit {
-        Commit {
-            raw: data,
-            size: 0,
-        }
     }
 }
 
@@ -134,4 +86,57 @@ impl Object for Commit {
     fn hash(&self) -> Hash {
         Hash::new(&self.raw)
     }
+}
+
+pub fn parse_blob(raw: &Vec<u8>, body: &Vec<u8>) -> Result<Commit, String> {
+    Err(String::from("NYI"))
+}
+
+pub fn parse_tree(raw: &Vec<u8>, body: &Vec<u8>) -> Result<Tree, String> {
+    Err(String::from("NYI"))
+}
+
+pub fn parse_commit(raw: &Vec<u8>, body: &Vec<u8>) -> Result<Commit, String> {
+    Err(String::from("NYI"))
+}
+
+pub fn parse_header(raw_header: &Vec<u8>) -> Result<Header, String> {
+    let parse = |x, t| {
+        from_utf8(&raw_header[x..]).map_err(|e| {
+            e.to_string()
+        }).and_then(|size_string| {
+            size_string.parse::<usize>().map_err(|e| e.to_string())
+        }).map(|size_usize| {
+            Header{
+                typp: t,
+                size: size_usize,
+            }
+        })
+    };
+    if raw_header[0..4] == *b"tree" {
+        parse(5, Type::Tree)
+    } else if raw_header[0..4] == *b"blob" {
+        parse(5, Type::Blob)
+    } else if raw_header[0..6] == *b"commit" {
+        parse(7, Type::Commit)
+    } else {
+        Err(String::from("unrecognized header"))
+    }
+}
+
+pub fn parse_object(raw: &Vec<u8>) -> Result<Box<Object>, String> {
+    raw.iter().position(|&b| b == 0u8).map(|l| {
+        let raw_header: Vec<u8> = raw.iter().take(l).map(|b| *b).collect();
+        let raw_body: Vec<u8> = raw.iter().skip(l+1).map(|b| *b).collect();
+        (raw_header, raw_body)
+    }).and_then(|(rh, rb)| {
+        parse_header(&rh).map(|h| (h, rb)).ok()
+    }).and_then(|(h, rb)| {
+        let obj_opt: Option<Box<Object>> = match h.typp {
+            Type::Blob => parse_blob(raw, &rb).map(|b| Box::new(b) as Box<Object>).ok(),
+            Type::Tree => parse_tree(raw, &rb).map(|t| Box::new(t) as Box<Object>).ok(),
+            Type::Commit => parse_commit(raw, &rb).map(|c| Box::new(c) as Box<Object>).ok(),
+        };
+        obj_opt
+    }).ok_or(String::from("failed to parse object"))
 }

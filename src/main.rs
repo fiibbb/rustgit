@@ -26,18 +26,4 @@ fn test_iter() {
     data.push(b'o');
     data.push(b'l');
     test_iter_2(&data);
-    // let slice = &data[0..];
-    // let s: &str = std::str::from_utf8(slice).unwrap();
-    // println!("{}", s);
 }
-
-/*
-fn test_zlib() {
-    let p = Path::new(".git/objects/10/1e501410c12175ff4471dcc8e208b781529d81");
-    let bytes = fs::read(p).unwrap();
-    let mut decoder = ZlibDecoder::new(&bytes[..]);
-    let mut decoded = String::new();
-    decoder.read_to_string(&mut decoded).unwrap();
-    println!("got string:\n{}", decoded);
-}
-*/

@@ -49,9 +49,9 @@ impl Repo {
                             let mut decoder = ZlibDecoder::new(&file_bytes[..]);
                             let mut decoded: Vec<u8> = Vec::new();
                             decoder.read_to_end(&mut decoded).unwrap();
-                            let header = object::get_header(&decoded).unwrap();
+                            let obj = object::parse_object(&decoded).unwrap();
                             let sha = object::Hash::new(&decoded).hex_string();
-                            println!("{:?} {:?}", sha, header);
+                            // println!("{:?} {:?}", sha, obj);
                             self.raw_objs.insert(file_name.to_string(), decoded);
                         }
                     }
