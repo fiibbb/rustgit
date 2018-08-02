@@ -18,8 +18,7 @@ pub enum Type {
 pub struct Header {
     typp: Type,
     size: usize,
-}
-
+} 
 pub trait Object {
     fn hash(&self) -> Hash;
 }
@@ -28,6 +27,7 @@ pub trait Object {
 pub struct Blob {
     raw: Vec<u8>,
     size: usize,
+    data: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -48,13 +48,16 @@ pub struct TreeEntry {
 pub struct Tree {
     raw: Vec<u8>,
     size: usize,
-    entries: Vec<TreeEntry>,
+    children: Vec<TreeEntry>,
 }
 
 #[derive(Debug)]
 pub struct Commit {
     raw: Vec<u8>,
     size: usize,
+    tree: Hash,
+    parents: Vec<Hash>,
+    msg: String,
 }
 
 impl Hash {
@@ -88,15 +91,19 @@ impl Object for Commit {
     }
 }
 
-pub fn parse_blob(raw: &Vec<u8>, body: &Vec<u8>) -> Result<Commit, String> {
+pub fn parse_blob(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Blob, String> {
+    Ok(Blob{
+        raw: raw.clone(),
+        size: header.size,
+        data: body.clone(),
+    })
+}
+
+pub fn parse_tree(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Tree, String> {
     Err(String::from("NYI"))
 }
 
-pub fn parse_tree(raw: &Vec<u8>, body: &Vec<u8>) -> Result<Tree, String> {
-    Err(String::from("NYI"))
-}
-
-pub fn parse_commit(raw: &Vec<u8>, body: &Vec<u8>) -> Result<Commit, String> {
+pub fn parse_commit(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Commit, String> {
     Err(String::from("NYI"))
 }
 
@@ -133,9 +140,9 @@ pub fn parse_object(raw: &Vec<u8>) -> Result<Box<Object>, String> {
         parse_header(&rh).map(|h| (h, rb)).ok()
     }).and_then(|(h, rb)| {
         let obj_opt: Option<Box<Object>> = match h.typp {
-            Type::Blob => parse_blob(raw, &rb).map(|b| Box::new(b) as Box<Object>).ok(),
-            Type::Tree => parse_tree(raw, &rb).map(|t| Box::new(t) as Box<Object>).ok(),
-            Type::Commit => parse_commit(raw, &rb).map(|c| Box::new(c) as Box<Object>).ok(),
+            Type::Blob => parse_blob(raw, &h, &rb).map(|b| Box::new(b) as Box<Object>).ok(),
+            Type::Tree => parse_tree(raw, &h, &rb).map(|t| Box::new(t) as Box<Object>).ok(),
+            Type::Commit => parse_commit(raw, &h, &rb).map(|c| Box::new(c) as Box<Object>).ok(),
         };
         obj_opt
     }).ok_or(String::from("failed to parse object"))
