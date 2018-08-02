@@ -31,17 +31,10 @@ pub struct Blob {
 }
 
 #[derive(Debug)]
-pub enum TreeEntryType {
-    Blob,
-    Tree,
-}
-
-#[derive(Debug)]
 pub struct TreeEntry {
     mode: String,
-    typp: TreeEntryType,
-    hash: Hash,
     name: String,
+    hash: Hash,
 }
 
 #[derive(Debug)]
@@ -57,16 +50,14 @@ pub struct Commit {
     size: usize,
     tree: Hash,
     parents: Vec<Hash>,
-    msg: String,
 }
 
 impl Hash {
-    pub fn new(data: &Vec<u8>) -> Hash {
+    pub fn from(data: &Vec<u8>) -> Hash {
         Hash {
             hash: sha1::Sha1::from(data).digest().bytes()
         }
     }
-
     pub fn hex_string(&self) -> String {
         let s: Vec<String> = self.hash.iter().map(|b| format!("{:02x}", b)).collect();
         s.join("")
@@ -75,23 +66,29 @@ impl Hash {
 
 impl Object for Blob {
     fn hash(&self) -> Hash {
-        Hash::new(&self.raw)
+        Hash::from(&self.raw)
     }
 }
 
 impl Object for Tree {
     fn hash(&self) -> Hash {
-        Hash::new(&self.raw)
+        Hash::from(&self.raw)
     }
 }
 
 impl Object for Commit {
     fn hash(&self) -> Hash {
-        Hash::new(&self.raw)
+        Hash::from(&self.raw)
     }
 }
 
-pub fn parse_blob(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Blob, String> {
+fn decode_hex_str(s: &str) -> [u8;20] {
+    // TODO: fix this
+    // This should be turnning a 40 byte string into a 20 byte array.
+    [0;20]
+}
+
+fn parse_blob(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Blob, String> {
     Ok(Blob{
         raw: raw.clone(),
         size: header.size,
@@ -99,15 +96,59 @@ pub fn parse_blob(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Blob
     })
 }
 
-pub fn parse_tree(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Tree, String> {
+fn parse_tree(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Tree, String> {
+    let next_raw_tree_entry = |tail: Vec<u8>| -> Option<(Vec<u8>, Vec<u8>)> {
+        tail.iter().position(|&b| b == 0u8).map(|l| (tail[..l+40].to_vec(), tail[l+40..].to_vec()))
+    };
+    let mut raw_tree_entries: Vec<Vec<u8>> = Vec::new();
+    let mut tail: Vec<u8> = body.clone();
+    loop {
+        match next_raw_tree_entry(tail) {
+            Some((h, t)) => {
+                raw_tree_entries.push(h);
+                tail = t;
+            },
+            None => break,
+        }
+    };
+    let tree_entries: Vec<TreeEntry> = raw_tree_entries.iter().map(|re| {
+        re.iter().position(|&b| {
+            b == b' '
+        }).and_then(|l1| {
+            re.iter().position(|&b| {
+                b == 0u8
+            }).and_then(|l2| {
+                from_utf8(&re[..l1]).ok().and_then(|mode| {
+                    from_utf8(&re[l1+1..l2]).ok().and_then(|name| {
+                        from_utf8(&re[l2+1..l2+41]).ok().map(|hash_str| {
+                            let hash = decode_hex_str(hash_str);
+                            TreeEntry{
+                                mode: mode.to_string(),
+                                name: name.to_string(),
+                                hash: Hash{hash},
+                            }
+                        })
+                    })
+                })
+            })
+        })
+    }).filter_map(|o| o).collect();
+    if tree_entries.len() != raw_tree_entries.len() {
+        return Err(String::from("failed to parse at least one tree entry"));
+    } else {
+        return Ok(Tree{
+            raw: raw.clone(),
+            size: header.size,
+            children: tree_entries,
+        });
+    }
+}
+
+fn parse_commit(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Commit, String> {
     Err(String::from("NYI"))
 }
 
-pub fn parse_commit(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Commit, String> {
-    Err(String::from("NYI"))
-}
-
-pub fn parse_header(raw_header: &Vec<u8>) -> Result<Header, String> {
+fn parse_header(raw_header: &Vec<u8>) -> Result<Header, String> {
     let parse = |x, t| {
         from_utf8(&raw_header[x..]).map_err(|e| {
             e.to_string()

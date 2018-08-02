@@ -50,7 +50,7 @@ impl Repo {
                             let mut decoded: Vec<u8> = Vec::new();
                             decoder.read_to_end(&mut decoded).unwrap();
                             let obj = object::parse_object(&decoded).unwrap();
-                            let sha = object::Hash::new(&decoded).hex_string();
+                            let sha = object::Hash::from(&decoded).hex_string();
                             // println!("{:?} {:?}", sha, obj);
                             self.raw_objs.insert(file_name.to_string(), decoded);
                         }
