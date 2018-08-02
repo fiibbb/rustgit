@@ -97,6 +97,7 @@ fn parse_blob(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Blob, St
 }
 
 fn parse_tree(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Tree, String> {
+
     let next_raw_tree_entry = |tail: Vec<u8>| -> Option<(Vec<u8>, Vec<u8>)> {
         tail.iter().position(|&b| b == 0u8).map(|l| (tail[..l+40].to_vec(), tail[l+40..].to_vec()))
     };
@@ -111,6 +112,7 @@ fn parse_tree(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Tree, St
             None => break,
         }
     };
+
     let tree_entries: Vec<TreeEntry> = raw_tree_entries.iter().map(|re| {
         re.iter().position(|&b| {
             b == b' '
@@ -133,19 +135,56 @@ fn parse_tree(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Tree, St
             })
         })
     }).filter_map(|o| o).collect();
+
     if tree_entries.len() != raw_tree_entries.len() {
         return Err(String::from("failed to parse at least one tree entry"));
-    } else {
-        return Ok(Tree{
-            raw: raw.clone(),
-            size: header.size,
-            children: tree_entries,
-        });
     }
+
+    return Ok(Tree{
+        raw: raw.clone(),
+        size: header.size,
+        children: tree_entries,
+    });
 }
 
 fn parse_commit(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Commit, String> {
-    Err(String::from("NYI"))
+
+    if body[..5] != *b"tree " {
+        return Err(String::from("invalid commit tree entry"));
+    }
+
+    let tree: Hash;
+    if let Some(hash_str) = from_utf8(&body[5..45]).ok() {
+        let hash = decode_hex_str(hash_str);
+        tree = Hash{hash};
+    } else {
+        return Err(String::from("unable to parse tree hash"));
+    }
+
+    let mut parents: Vec<Hash> = Vec::new();
+    let mut tail: &[u8] = &body[46..];
+    loop {
+        if tail[..6] == *b"parent" {
+            if let Some(hash_str) = from_utf8(&tail[7..47]).ok() {
+                let hash = decode_hex_str(hash_str);
+                parents.push(Hash{hash});
+                tail = &tail[48..];
+            } else {
+                return Err(String::from("unable to parse parent hash"));
+            }
+        } else if tail[..6] == *b"author" {
+            break;
+        } else {
+            return Err(String::from("unrecognized parent entry"));
+        }
+    }
+
+    return Ok(Commit{
+        raw: raw.clone(),
+        size: header.size,
+        tree: tree,
+        parents: parents,
+    });
 }
 
 fn parse_header(raw_header: &Vec<u8>) -> Result<Header, String> {
