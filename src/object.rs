@@ -19,14 +19,17 @@ pub struct Header {
     typp: Type,
     size: usize,
 } 
+
 pub trait Object {
-    fn hash(&self) -> Hash;
+}
+
+pub struct FullObject {
+    header: Header,
+    object: Box<Object>,
 }
 
 #[derive(Debug)]
 pub struct Blob {
-    raw: Vec<u8>,
-    size: usize,
     data: Vec<u8>,
 }
 
@@ -39,15 +42,11 @@ pub struct TreeEntry {
 
 #[derive(Debug)]
 pub struct Tree {
-    raw: Vec<u8>,
-    size: usize,
     children: Vec<TreeEntry>,
 }
 
 #[derive(Debug)]
 pub struct Commit {
-    raw: Vec<u8>,
-    size: usize,
     tree: Hash,
     parents: Vec<Hash>,
 }
@@ -65,21 +64,12 @@ impl Hash {
 }
 
 impl Object for Blob {
-    fn hash(&self) -> Hash {
-        Hash::from(&self.raw)
-    }
 }
 
 impl Object for Tree {
-    fn hash(&self) -> Hash {
-        Hash::from(&self.raw)
-    }
 }
 
 impl Object for Commit {
-    fn hash(&self) -> Hash {
-        Hash::from(&self.raw)
-    }
 }
 
 fn decode_hex_str(s: &str) -> [u8;20] {
@@ -88,15 +78,13 @@ fn decode_hex_str(s: &str) -> [u8;20] {
     [0;20]
 }
 
-fn parse_blob(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Blob, String> {
+fn parse_blob(body: &Vec<u8>) -> Result<Blob, String> {
     Ok(Blob{
-        raw: raw.clone(),
-        size: header.size,
         data: body.clone(),
     })
 }
 
-fn parse_tree(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Tree, String> {
+fn parse_tree(body: &Vec<u8>) -> Result<Tree, String> {
 
     let next_raw_tree_entry = |tail: Vec<u8>| -> Option<(Vec<u8>, Vec<u8>)> {
         tail.iter().position(|&b| b == 0u8).map(|l| (tail[..l+40].to_vec(), tail[l+40..].to_vec()))
@@ -141,13 +129,11 @@ fn parse_tree(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Tree, St
     }
 
     return Ok(Tree{
-        raw: raw.clone(),
-        size: header.size,
         children: tree_entries,
     });
 }
 
-fn parse_commit(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Commit, String> {
+fn parse_commit(body: &Vec<u8>) -> Result<Commit, String> {
 
     if body[..5] != *b"tree " {
         return Err(String::from("invalid commit tree entry"));
@@ -180,8 +166,6 @@ fn parse_commit(raw: &Vec<u8>, header: &Header, body: &Vec<u8>) -> Result<Commit
     }
 
     return Ok(Commit{
-        raw: raw.clone(),
-        size: header.size,
         tree: tree,
         parents: parents,
     });
@@ -211,7 +195,7 @@ fn parse_header(raw_header: &Vec<u8>) -> Result<Header, String> {
     }
 }
 
-pub fn parse_object(raw: &Vec<u8>) -> Result<Box<Object>, String> {
+pub fn parse_object(raw: &Vec<u8>) -> Result<FullObject, String> {
     raw.iter().position(|&b| b == 0u8).map(|l| {
         let raw_header: Vec<u8> = raw.iter().take(l).map(|b| *b).collect();
         let raw_body: Vec<u8> = raw.iter().skip(l+1).map(|b| *b).collect();
@@ -219,11 +203,10 @@ pub fn parse_object(raw: &Vec<u8>) -> Result<Box<Object>, String> {
     }).and_then(|(rh, rb)| {
         parse_header(&rh).map(|h| (h, rb)).ok()
     }).and_then(|(h, rb)| {
-        let obj_opt: Option<Box<Object>> = match h.typp {
-            Type::Blob => parse_blob(raw, &h, &rb).map(|b| Box::new(b) as Box<Object>).ok(),
-            Type::Tree => parse_tree(raw, &h, &rb).map(|t| Box::new(t) as Box<Object>).ok(),
-            Type::Commit => parse_commit(raw, &h, &rb).map(|c| Box::new(c) as Box<Object>).ok(),
-        };
-        obj_opt
+        match h.typp {
+            Type::Blob => parse_blob(&rb).map(|b| FullObject{header:h, object:Box::new(b)}).ok(),
+            Type::Tree => parse_tree(&rb).map(|t| FullObject{header:h, object:Box::new(t)}).ok(),
+            Type::Commit => parse_commit(&rb).map(|c| FullObject{header:h, object:Box::new(c)}).ok(),
+        }
     }).ok_or(String::from("failed to parse object"))
 }
