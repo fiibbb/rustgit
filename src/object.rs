@@ -7,7 +7,7 @@ use std::io::Read;
 use std::str::from_utf8;
 
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash)]
 pub struct Hash {
     hash: [u8;20]
 }
@@ -60,14 +60,29 @@ pub struct Commit {
 }
 
 impl Hash {
-    pub fn from(data: &Vec<u8>) -> Hash {
+    pub fn from(data: &[u8]) -> Hash {
         Hash {
             hash: sha1::Sha1::from(data).digest().bytes()
         }
     }
-    pub fn hex_string(&self) -> String {
+    pub fn parse(v: &[u8]) -> Option<Hash> {
+        let mut hash: [u8;20] = [0;20];
+        if v.len() >= 20 {
+            hash.copy_from_slice(&v[..20]);
+            Some(Hash{hash})
+        } else {
+            None
+        }
+    }
+    pub fn hex(&self) -> String {
         let s: Vec<String> = self.hash.iter().map(|b| format!("{:02x}", b)).collect();
         s.join("")
+    }
+}
+
+impl fmt::Debug for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Hash {{ {:02x?} }}", self.hash)
     }
 }
 
@@ -98,29 +113,29 @@ fn decode_hex_str(s: &str) -> Option<[u8;20]> {
     })
 }
 
-fn parse_blob(body: &Vec<u8>) -> Result<Blob, String> {
+fn parse_blob(body: &[u8]) -> Result<Blob, String> {
     Ok(Blob{
-        data: body.clone(),
+        data: body.to_vec(),
     })
 }
 
-fn parse_tree(body: &Vec<u8>) -> Result<Tree, String> {
+fn parse_tree(body: &[u8]) -> Result<Tree, String> {
 
     let mut tree_entries: Vec<TreeEntry> = Vec::new();
-    let mut tail: Vec<u8> = body.clone();
+    let mut tail: &[u8] = body;
 
     loop {
-        if let Some((h, t)) = tail.iter().position(|&b| b == 0u8).map(|l| (tail[..l+40].to_vec(), tail[l+40..].to_vec())) {
+        if let Some((h, t)) = tail.iter().position(|&b| b == 0u8).map(|l| (&tail[..l+21], &tail[l+21..])) {
             let entry_opt = h.iter().position(|&b| b == b' ').and_then(|l1| {
                 h.iter().position(|&b| b == 0u8).and_then(|l2| {
                     from_utf8(&h[..l1]).ok().and_then(|mode| {
                         from_utf8(&h[l1+1..l2]).ok().and_then(|name| {
-                            from_utf8(&h[l2+1..l2+41]).ok().and_then(|hash_str| {
-                                decode_hex_str(hash_str).map(|hash| TreeEntry {
+                            Hash::parse(&h[l2+1..l2+21]).map(|hash| {
+                                TreeEntry{
                                     mode: mode.to_string(),
                                     name: name.to_string(),
-                                    hash: Hash{hash},
-                                })
+                                    hash: hash,
+                                }
                             })
                         })
                     })
@@ -137,12 +152,10 @@ fn parse_tree(body: &Vec<u8>) -> Result<Tree, String> {
         }
     };
 
-    return Ok(Tree{
-        children: tree_entries,
-    });
+    Ok(Tree{children:tree_entries})
 }
 
-fn parse_commit(body: &Vec<u8>) -> Result<Commit, String> {
+fn parse_commit(body: &[u8]) -> Result<Commit, String> {
 
     let mut tree_opt: Option<Hash> = None;
     let mut author_opt: Option<String> = None;
@@ -233,10 +246,10 @@ fn parse_commit(body: &Vec<u8>) -> Result<Commit, String> {
         })
     });
 
-    return commit_opt.ok_or(String::from("missing commit components"));
+    commit_opt.ok_or(String::from("missing commit components"))
 }
 
-fn parse_header(raw_header: &Vec<u8>) -> Result<Header, String> {
+fn parse_header(raw_header: &[u8]) -> Result<Header, String> {
     let parse = |x, t| {
         from_utf8(&raw_header[x..]).map_err(|e| {
             e.to_string()
@@ -260,11 +273,9 @@ fn parse_header(raw_header: &Vec<u8>) -> Result<Header, String> {
     }
 }
 
-pub fn parse_object(raw: &Vec<u8>) -> Result<FullObject, String> {
+fn parse_object(raw: &[u8]) -> Result<FullObject, String> {
     raw.iter().position(|&b| b == 0u8).map(|l| {
-        let raw_header: Vec<u8> = raw.iter().take(l).map(|b| *b).collect();
-        let raw_body: Vec<u8> = raw.iter().skip(l+1).map(|b| *b).collect();
-        (raw_header, raw_body)
+        (&raw[..l], &raw[l+1..])
     }).and_then(|(rh, rb)| {
         parse_header(&rh).map(|h| (h, rb)).ok()
     }).and_then(|(h, rb)| {
@@ -276,7 +287,7 @@ pub fn parse_object(raw: &Vec<u8>) -> Result<FullObject, String> {
     }).ok_or(String::from("failed to parse object"))
 }
 
-pub fn deflate_and_parse_object(compressed: &Vec<u8>) -> Result<(Hash,FullObject), String> {
+pub fn deflate_and_parse_object(compressed: &[u8]) -> Result<(Hash,FullObject), String> {
     let mut decoder = flate2::read::ZlibDecoder::new(&compressed[..]);
     let mut deflated: Vec<u8> = Vec::new();
     if let Err(e) = decoder.read_to_end(&mut deflated) {
