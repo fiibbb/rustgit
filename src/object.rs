@@ -1,6 +1,11 @@
+extern crate flate2;
+extern crate hex;
 extern crate sha1;
 
+use std::fmt;
+use std::io::Read;
 use std::str::from_utf8;
+
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Hash {
@@ -66,6 +71,12 @@ impl Hash {
     }
 }
 
+impl fmt::Debug for FullObject {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "FullObject()")
+    }
+}
+
 impl Object for Blob {
 }
 
@@ -76,9 +87,15 @@ impl Object for Commit {
 }
 
 fn decode_hex_str(s: &str) -> Option<[u8;20]> {
-    // TODO: fix this
-    // This should be turnning a 40 byte string into a 20 byte array.
-    Some([0;20])
+    hex::decode(s).ok().and_then(|v| {
+        let mut res: [u8;20] = [0;20];
+        if v.len() == 20 {
+            res.copy_from_slice(&v[..]);
+            Some(res)
+        } else {
+            None
+        }
+    })
 }
 
 fn parse_blob(body: &Vec<u8>) -> Result<Blob, String> {
@@ -257,4 +274,15 @@ pub fn parse_object(raw: &Vec<u8>) -> Result<FullObject, String> {
             Type::Commit => parse_commit(&rb).map(|c| FullObject{header:h, object:Box::new(c)}).ok(),
         }
     }).ok_or(String::from("failed to parse object"))
+}
+
+pub fn deflate_and_parse_object(compressed: &Vec<u8>) -> Result<(Hash,FullObject), String> {
+    let mut decoder = flate2::read::ZlibDecoder::new(&compressed[..]);
+    let mut deflated: Vec<u8> = Vec::new();
+    if let Err(e) = decoder.read_to_end(&mut deflated) {
+        return Err(String::from(e.to_string()));
+    }
+    parse_object(&deflated).map(|obj| {
+        (Hash::from(&deflated), obj)
+    })
 }
