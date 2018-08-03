@@ -49,6 +49,9 @@ pub struct Tree {
 pub struct Commit {
     tree: Hash,
     parents: Vec<Hash>,
+    author: String,
+    committer: String,
+    message: String,
 }
 
 impl Hash {
@@ -72,10 +75,10 @@ impl Object for Tree {
 impl Object for Commit {
 }
 
-fn decode_hex_str(s: &str) -> [u8;20] {
+fn decode_hex_str(s: &str) -> Option<[u8;20]> {
     // TODO: fix this
     // This should be turnning a 40 byte string into a 20 byte array.
-    [0;20]
+    Some([0;20])
 }
 
 fn parse_blob(body: &Vec<u8>) -> Result<Blob, String> {
@@ -86,47 +89,36 @@ fn parse_blob(body: &Vec<u8>) -> Result<Blob, String> {
 
 fn parse_tree(body: &Vec<u8>) -> Result<Tree, String> {
 
-    let next_raw_tree_entry = |tail: Vec<u8>| -> Option<(Vec<u8>, Vec<u8>)> {
-        tail.iter().position(|&b| b == 0u8).map(|l| (tail[..l+40].to_vec(), tail[l+40..].to_vec()))
-    };
-    let mut raw_tree_entries: Vec<Vec<u8>> = Vec::new();
+    let mut tree_entries: Vec<TreeEntry> = Vec::new();
     let mut tail: Vec<u8> = body.clone();
-    loop {
-        match next_raw_tree_entry(tail) {
-            Some((h, t)) => {
-                raw_tree_entries.push(h);
-                tail = t;
-            },
-            None => break,
-        }
-    };
 
-    let tree_entries: Vec<TreeEntry> = raw_tree_entries.iter().map(|re| {
-        re.iter().position(|&b| {
-            b == b' '
-        }).and_then(|l1| {
-            re.iter().position(|&b| {
-                b == 0u8
-            }).and_then(|l2| {
-                from_utf8(&re[..l1]).ok().and_then(|mode| {
-                    from_utf8(&re[l1+1..l2]).ok().and_then(|name| {
-                        from_utf8(&re[l2+1..l2+41]).ok().map(|hash_str| {
-                            let hash = decode_hex_str(hash_str);
-                            TreeEntry{
-                                mode: mode.to_string(),
-                                name: name.to_string(),
-                                hash: Hash{hash},
-                            }
+    loop {
+        if let Some((h, t)) = tail.iter().position(|&b| b == 0u8).map(|l| (tail[..l+40].to_vec(), tail[l+40..].to_vec())) {
+            let entry_opt = h.iter().position(|&b| b == b' ').and_then(|l1| {
+                h.iter().position(|&b| b == 0u8).and_then(|l2| {
+                    from_utf8(&h[..l1]).ok().and_then(|mode| {
+                        from_utf8(&h[l1+1..l2]).ok().and_then(|name| {
+                            from_utf8(&h[l2+1..l2+41]).ok().and_then(|hash_str| {
+                                decode_hex_str(hash_str).map(|hash| TreeEntry {
+                                    mode: mode.to_string(),
+                                    name: name.to_string(),
+                                    hash: Hash{hash},
+                                })
+                            })
                         })
                     })
                 })
-            })
-        })
-    }).filter_map(|o| o).collect();
-
-    if tree_entries.len() != raw_tree_entries.len() {
-        return Err(String::from("failed to parse at least one tree entry"));
-    }
+            });
+            if let Some(entry) = entry_opt {
+                tree_entries.push(entry);
+                tail = t;
+            } else {
+                return Err(String::from("failed to parse tree entry"));
+            }
+        } else {
+            break;
+        }
+    };
 
     return Ok(Tree{
         children: tree_entries,
@@ -135,40 +127,96 @@ fn parse_tree(body: &Vec<u8>) -> Result<Tree, String> {
 
 fn parse_commit(body: &Vec<u8>) -> Result<Commit, String> {
 
-    if body[..5] != *b"tree " {
-        return Err(String::from("invalid commit tree entry"));
-    }
-
-    let tree: Hash;
-    if let Some(hash_str) = from_utf8(&body[5..45]).ok() {
-        let hash = decode_hex_str(hash_str);
-        tree = Hash{hash};
-    } else {
-        return Err(String::from("unable to parse tree hash"));
-    }
-
+    let mut tree_opt: Option<Hash> = None;
+    let mut author_opt: Option<String> = None;
+    let mut commiter_opt: Option<String> = None;
     let mut parents: Vec<Hash> = Vec::new();
-    let mut tail: &[u8] = &body[46..];
+    let msg: String;
+    let mut tail: &[u8] = body;
+
     loop {
-        if tail[..6] == *b"parent" {
+        if tail.len() >= 46 && tail[..4] == *b"tree" {
+            if let None = tree_opt {
+                if let Some(hash_str) = from_utf8(&tail[5..45]).ok() {
+                    if let Some(hash) = decode_hex_str(hash_str) {
+                        tree_opt = Some(Hash{hash});
+                        tail = &tail[46..];
+                    } else {
+                        return Err(String::from("unable to pare tree hash"));
+                    }
+                } else {
+                    return Err(String::from("unable to parse tree hash"));
+                }
+            } else {
+                return Err(String::from("duplicate tree entry in commit"));
+            }
+        } else if tail.len() >= 7 && tail[..6] == *b"author" {
+            if let None = author_opt {
+                if let Some(end_idx) = tail.iter().position(|&b| b == 10u8) {
+                    if let Some(author_str) = from_utf8(&tail[7..end_idx]).ok() {
+                        author_opt = Some(author_str.to_string());
+                        tail = &tail[end_idx+1..];
+                    } else {
+                        return Err(String::from("unable to parse author"));
+                    }
+                } else {
+                    return Err(String::from("unable to parse author"));
+                }
+            } else {
+                return Err(String::from("duplicate author entry in commit"));
+            }
+        } else if tail.len() >= 10 && tail[..9] == *b"committer" {
+            if let None = commiter_opt {
+                if let Some(end_idx) = tail.iter().position(|&b| b == 10u8) {
+                    if let Some(committer_str) = from_utf8(&tail[10..end_idx]).ok() {
+                        commiter_opt = Some(committer_str.to_string());
+                        tail = &tail[end_idx+1..];
+                    } else {
+                        return Err(String::from("unable to parse committer"));
+                    }
+                } else {
+                    return Err(String::from("unable to parse committer"));
+                }
+            } else {
+                return Err(String::from("duplicate committer entry in commit"));
+            }
+        } else if tail.len() >= 48 && tail[..6] == *b"parent" {
             if let Some(hash_str) = from_utf8(&tail[7..47]).ok() {
-                let hash = decode_hex_str(hash_str);
-                parents.push(Hash{hash});
-                tail = &tail[48..];
+                if let Some(hash) = decode_hex_str(hash_str) {
+                    parents.push(Hash{hash});
+                    tail = &tail[48..];
+                } else {
+                    return Err(String::from("unable to parse parent hash"));
+                }
             } else {
                 return Err(String::from("unable to parse parent hash"));
             }
-        } else if tail[..6] == *b"author" {
-            break;
-        } else {
-            return Err(String::from("unrecognized parent entry"));
+        } else if tail.len() > 0 {
+            if let Some(msg_str) = from_utf8(&tail[..]).ok() {
+                msg = msg_str.to_string();
+                tail = &[];
+                break;
+            } else {
+                return Err(String::from("unable to parse message"));
+            }
         }
     }
 
-    return Ok(Commit{
-        tree: tree,
-        parents: parents,
+    let commit_opt = tree_opt.and_then(|t| {
+        author_opt.and_then(|a| {
+            commiter_opt.map(|c| {
+                Commit{
+                    tree:t,
+                    parents: parents,
+                    author: a,
+                    committer: c,
+                    message: msg,
+                }
+            })
+        })
     });
+
+    return commit_opt.ok_or(String::from("missing commit components"));
 }
 
 fn parse_header(raw_header: &Vec<u8>) -> Result<Header, String> {
