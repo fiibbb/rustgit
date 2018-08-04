@@ -7,6 +7,20 @@ use std::io::prelude::*;
 use std::str::from_utf8;
 
 
+fn utf8(v: &[u8]) -> Result<String, String> {
+    from_utf8(v).map_err(|e| e.to_string()).map(|s| s.to_string())
+}
+
+fn encode(v: &[u8]) -> Result<Vec<u8>, String> {
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(v).map_err(|e| e.to_string()).and_then(|_| encoder.finish().map_err(|e| e.to_string()))
+}
+
+fn decode(v: &[u8]) -> Result<Vec<u8>, String> {
+    let mut decompressed = Vec::new();
+    flate2::read::ZlibDecoder::new(v).read_to_end(&mut decompressed).map_err(|e| e.to_string()).map(|_| decompressed)
+}
+
 #[derive(PartialEq, Eq, Hash)]
 pub struct Hash {
     hash: [u8;20]
@@ -79,7 +93,7 @@ impl Hash {
         }
     }
     pub fn from_hex(v: &[u8]) -> Result<Hash, String> {
-        from_utf8(v).map_err(|e| e.to_string()).and_then(|s| hex::decode(s).map_err(|e| e.to_string()).and_then(|bs| Hash::from(&bs)))
+        utf8(v).and_then(|s| hex::decode(s).map_err(|e| e.to_string()).and_then(|bs| Hash::from(&bs)))
     }
     pub fn hex(&self) -> String {
         let s: Vec<String> = self.hash.iter().map(|b| format!("{:02x}", b)).collect();
@@ -141,13 +155,13 @@ impl Record {
     fn parse(v: &[u8]) -> Result<Record, String> {
         v.iter().position(|&b| b == b'<').ok_or(String::from("unable to locate <")).and_then(|l1| {
             v.iter().position(|&b| b == b'>').ok_or(String::from("unable to locate >")).and_then(|l2| {
-                from_utf8(&v[..l1-1]).map_err(|e| e.to_string()).and_then(|name| {
-                    from_utf8(&v[l1+1..l2]).map_err(|e| e.to_string()).and_then(|email| {
+                utf8(&v[..l1-1]).and_then(|name| {
+                    utf8(&v[l1+1..l2]).and_then(|email| {
                         v[l2+2..].iter().position(|&b| b == b' ').ok_or(String::from("unable to locate space")).and_then(|l3_offset| {
                             let l3 = l3_offset+l2+2;
-                            from_utf8(&v[l2+2..l3]).map_err(|e| e.to_string()).and_then(|ts_str| {
+                            utf8(&v[l2+2..l3]).and_then(|ts_str| {
                                 ts_str.parse::<u64>().map_err(|e| e.to_string()).and_then(|ts| {
-                                    from_utf8(&v[l3+1..]).map_err(|e| e.to_string()).map(|tz| {
+                                    utf8(&v[l3+1..]).map(|tz| {
                                         Record {
                                             name: name.to_string(),
                                             email: email.to_string(),
@@ -182,8 +196,8 @@ impl Tree {
             let entry_res = tail.iter().position(|&b| b == 0u8).ok_or(String::from("unable to locate 0u8")).map(|l| (&tail[..l+21], &tail[l+21..])).and_then(|(h,t)| {
                 h.iter().position(|&b| b == b' ').ok_or(String::from("unable to locate space")).and_then(|l1| {
                     h.iter().position(|&b| b == 0u8).ok_or(String::from("unable to locate 0u8")).and_then(|l2| {
-                        from_utf8(&h[..l1]).map_err(|e| e.to_string()).and_then(|mode| {
-                            from_utf8(&h[l1+1..l2]).map_err(|e| e.to_string()).and_then(|name| {
+                        utf8(&h[..l1]).and_then(|mode| {
+                            utf8(&h[l1+1..l2]).and_then(|name| {
                                 Hash::from(&h[l2+1..l2+21]).map(|hash| {
                                     (TreeEntry{
                                         mode: mode.to_string(),
@@ -219,10 +233,10 @@ impl Commit {
         while tail.len() > 0 {
             if tail.len() >= 7 && tail[..6] == *b"author" {
                 if let None = author_opt {
-                    let author_res = tail.iter().position(|&b| b == 10u8).ok_or(String::from("unable to locate 10u8")).and_then(|end_idx| {
+                    let record_res = tail.iter().position(|&b| b == 10u8).ok_or(String::from("unable to locate 10u8")).and_then(|end_idx| {
                         Record::parse(&tail[7..end_idx]).map(|r| (r, end_idx))
                     });
-                    match author_res {
+                    match record_res {
                         Ok((record, end_idx)) => {
                             author_opt = Some(record);
                             tail = &tail[end_idx+1..];
@@ -234,10 +248,10 @@ impl Commit {
                 }
             } else if tail.len() >= 10 && tail[..9] == *b"committer" {
                 if let None = committer_opt {
-                    let committer_res = tail.iter().position(|&b| b == 10u8).ok_or(String::from("unable to locate 10u8")).and_then(|end_idx| {
+                    let record_res = tail.iter().position(|&b| b == 10u8).ok_or(String::from("unable to locate 10u8")).and_then(|end_idx| {
                         Record::parse(&tail[10..end_idx]).map(|r| (r, end_idx))
                     });
-                    match committer_res {
+                    match record_res {
                         Ok((record, end_idx)) => {
                             committer_opt = Some(record);
                             tail = &tail[end_idx+1..];
@@ -296,7 +310,7 @@ impl Commit {
 impl Header {
     fn parse(raw_header: &[u8]) -> Result<Header, String> {
         let parse = |x, t| {
-            from_utf8(&raw_header[x..]).map_err(|e| e.to_string()).and_then(|size_string| {
+            utf8(&raw_header[x..]).and_then(|size_string| {
                 size_string.parse::<usize>().map_err(|e| e.to_string()).map(|size_usize| {
                     Header{typp:t, size:size_usize}
                 })
@@ -312,16 +326,6 @@ impl Header {
             Err(String::from("unrecognized header"))
         }
     }
-}
-
-fn encode(v: &[u8]) -> Result<Vec<u8>, String> {
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(v).map_err(|e| e.to_string()).and_then(|_| encoder.finish().map_err(|e| e.to_string()))
-}
-
-fn decode(v: &[u8]) -> Result<Vec<u8>, String> {
-    let mut decompressed = Vec::new();
-    flate2::read::ZlibDecoder::new(v).read_to_end(&mut decompressed).map_err(|e| e.to_string()).map(|_| decompressed)
 }
 
 fn parse_object(obj: &[u8]) -> Result<Box<Object>, String> {
