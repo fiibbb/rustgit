@@ -31,7 +31,7 @@ impl Repo {
                         if file_path.is_file() {
                             println!("parsing object {:?}", file_path);
                             let file_bytes = fs::read(file_path)?;
-                            match object::parse(&file_bytes) {
+                            match object::deflate(&file_bytes) {
                                 Ok(obj) => {
                                     self.objs.insert(obj.hash(), obj);
                                     ()

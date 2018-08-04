@@ -19,7 +19,7 @@ fn test_load() {
 fn test_single() {
     let p = Path::new(".git/objects/b7/1c8977c043f1984f4613a397e2d954d285ea26");
     let f = fs::read(&p).unwrap();
-    let obj = object::parse(&f).unwrap();
+    let obj = object::deflate(&f).unwrap();
     let hash = (*obj).hash().hex();
     fs::write(Path::new("./test_save_target/foo"), obj.encode().unwrap());
     println!("path: {:?}", p);
