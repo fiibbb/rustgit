@@ -10,14 +10,6 @@ fn is_valid_obj_sub_dir(dir: &Path) -> bool {
     return true
 }
 
-// fn check_hash(file_path: &Path, obj: Box<object::Object>) {
-//     let hash_str = obj.hash().hex();
-//     let file_name = file_path.into_os_string().into_string().split("/").last();
-//     if hash_str != file_name {
-//         panic!("wtf: {} -- {}", hash_str, file_name);
-//     }
-// }
-
 pub struct Repo {
     objs: HashMap<object::Hash,Box<object::Object>>
 }
@@ -25,14 +17,6 @@ pub struct Repo {
 impl Repo {
     pub fn new() -> Repo {
         Repo {objs: HashMap::new()}
-    }
-
-    pub fn add(&mut self, obj: Box<object::Object>) -> Result<(), String> {
-        Err(String::from("NYI"))
-    }
-
-    pub fn get(&self, hash: object::Hash) -> Option<&Box<object::Object>> {
-        self.objs.get(&hash)
     }
 
     pub fn load(&mut self, dir: &Path) -> io::Result<()> {
@@ -49,7 +33,6 @@ impl Repo {
                             let file_bytes = fs::read(file_path)?;
                             match object::parse(&file_bytes) {
                                 Ok(obj) => {
-                                    // check_hash(file_path, obj);
                                     self.objs.insert(obj.hash(), obj);
                                     ()
                                 }
