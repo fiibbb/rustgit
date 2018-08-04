@@ -3,7 +3,7 @@ extern crate hex;
 extern crate sha1;
 
 use std::fmt;
-use std::io::Read;
+use std::io::prelude::*;
 use std::str::from_utf8;
 
 
@@ -30,11 +30,6 @@ pub struct Header {
     typp: Type,
     size: usize,
 } 
-
-pub trait Object {
-    fn pack(&self) -> Vec<u8>;
-    fn compressed(&self) -> Vec<u8>;
-}
 
 #[derive(Debug)]
 pub struct Blob {
@@ -64,9 +59,7 @@ pub struct Commit {
 
 impl Hash {
     pub fn sum(data: &[u8]) -> Hash {
-        Hash {
-            hash: sha1::Sha1::from(data).digest().bytes()
-        }
+        Hash{hash:sha1::Sha1::from(data).digest().bytes()}
     }
     pub fn from(v: &[u8]) -> Result<Hash, String> {
         let mut hash: [u8;20] = [0;20];
@@ -86,37 +79,68 @@ impl Hash {
     }
 }
 
+pub trait Object {
+    fn pack(&self) -> Vec<u8>;
+    fn hash(&self) -> Hash {
+        Hash::sum(&self.pack())
+    }
+    fn encode(&self) -> Result<Vec<u8>, String>{
+        encode(&self.pack())
+    }
+}
+
 impl Object for Blob {
     fn pack(&self) -> Vec<u8> {
-        Vec::new()
-    }
-    fn compressed(&self) -> Vec<u8> {
-        Vec::new()
+        let mut res = format!("blob {}\0", self.data.len()).as_bytes().to_vec();
+        res.append(&mut self.data.clone());
+        res
     }
 }
 
 impl Object for Tree {
     fn pack(&self) -> Vec<u8> {
-        Vec::new()
-    }
-    fn compressed(&self) -> Vec<u8> {
-        Vec::new()
+        let mut body = Vec::<u8>::new();
+        self.children.iter().for_each(|c| {
+            body.append(&mut c.mode.as_bytes().to_vec());
+            body.push(b' ');
+            body.append(&mut c.name.as_bytes().to_vec());
+            body.push(0u8);
+            body.append(&mut c.hash.hash.to_vec());
+        });
+        let mut res = format!("tree {}\0", body.len()).as_bytes().to_vec();
+        res.append(&mut body);
+        res
     }
 }
 
 impl Object for Commit {
     fn pack(&self) -> Vec<u8> {
-        Vec::new()
-    }
-    fn compressed(&self) -> Vec<u8> {
-        Vec::new()
+        let mut body = Vec::<u8>::new();
+        body.append(&mut format!("tree {}\n", self.tree.hex()).as_bytes().to_vec());
+        self.parents.iter().for_each(|p| {
+            body.append(&mut format!("parent {}\n", p.hex()).as_bytes().to_vec())
+        });
+        body.append(&mut format!("author {}\n", self.author).as_bytes().to_vec());
+        body.append(&mut format!("committer {}\n", self.committer).as_bytes().to_vec());
+        body.append(&mut self.message.as_bytes().to_vec());
+        let mut res = format!("commit {}\0", body.len()).as_bytes().to_vec();
+        res.append(&mut body);
+        res
     }
 }
 
+fn encode(v: &[u8]) -> Result<Vec<u8>, String> {
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(v).map_err(|e| e.to_string()).and_then(|_| encoder.finish().map_err(|e| e.to_string()))
+}
+
+fn decode(v: &[u8]) -> Result<Vec<u8>, String> {
+    let mut decompressed = Vec::new();
+    flate2::read::ZlibDecoder::new(v).read_to_end(&mut decompressed).map_err(|e| e.to_string()).map(|_| decompressed)
+}
+
 fn parse_blob(body: &[u8]) -> Result<Blob, String> {
-    Ok(Blob{
-        data: body.to_vec(),
-    })
+    Ok(Blob{data: body.to_vec()})
 }
 
 fn parse_tree(body: &[u8]) -> Result<Tree, String> {
@@ -272,10 +296,6 @@ fn parse_object(obj: &[u8]) -> Result<Box<Object>, String> {
     })
 }
 
-pub fn parse(compressed: &[u8]) -> Result<(Hash,Box<Object>), String> {
-    let mut deflated: Vec<u8> = Vec::new();
-    match flate2::read::ZlibDecoder::new(compressed).read_to_end(&mut deflated) {
-        Ok(_) => parse_object(&deflated).map(|obj| (Hash::sum(&deflated), obj)),
-        Err(e) => Err(e.to_string()),
-    }
+pub fn parse(compressed: &[u8]) -> Result<Box<Object>, String> {
+    decode(compressed).and_then(|v| parse_object(&v))
 }

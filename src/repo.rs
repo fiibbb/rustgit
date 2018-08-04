@@ -10,6 +10,14 @@ fn is_valid_obj_sub_dir(dir: &Path) -> bool {
     return true
 }
 
+// fn check_hash(file_path: &Path, obj: Box<object::Object>) {
+//     let hash_str = obj.hash().hex();
+//     let file_name = file_path.into_os_string().into_string().split("/").last();
+//     if hash_str != file_name {
+//         panic!("wtf: {} -- {}", hash_str, file_name);
+//     }
+// }
+
 pub struct Repo {
     objs: HashMap<object::Hash,Box<object::Object>>
 }
@@ -40,7 +48,11 @@ impl Repo {
                             println!("parsing object {:?}", file_path);
                             let file_bytes = fs::read(file_path)?;
                             match object::parse(&file_bytes) {
-                                Ok((sha, obj)) => {self.objs.insert(sha, obj);()},
+                                Ok(obj) => {
+                                    // check_hash(file_path, obj);
+                                    self.objs.insert(obj.hash(), obj);
+                                    ()
+                                }
                                 Err(e) => {println!("{:?}", e);()},
                             }
                         }
@@ -48,6 +60,18 @@ impl Repo {
                 }
             }
         }
-        return Ok(())
+        Ok(())
+    }
+
+    pub fn save(&self, dir: &Path) -> Result<(), String> {
+        if !dir.is_dir() {
+            return Err(format!("not a directory: {:?}", dir));
+        }
+        self.objs.iter().for_each(|(hash, obj)| {
+            let file_path = dir.join(hash.hex());
+            let file_content = obj.encode().unwrap();
+            fs::write(file_path.as_path(), file_content).unwrap();
+        });
+        Ok(())
     }
 }
