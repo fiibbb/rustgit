@@ -12,6 +12,12 @@ pub struct Hash {
     hash: [u8;20]
 }
 
+impl fmt::Debug for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Hash {{ {:02x?} }}", self.hash)
+    }
+}
+
 #[derive(Debug)]
 pub enum Type {
     Blob,
@@ -26,11 +32,8 @@ pub struct Header {
 } 
 
 pub trait Object {
-}
-
-pub struct FullObject {
-    header: Header,
-    object: Box<Object>,
+    fn pack(&self) -> Vec<u8>;
+    fn compressed(&self) -> Vec<u8>;
 }
 
 #[derive(Debug)]
@@ -83,25 +86,31 @@ impl Hash {
     }
 }
 
-impl fmt::Debug for Hash {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Hash {{ {:02x?} }}", self.hash)
-    }
-}
-
-impl fmt::Debug for FullObject {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "FullObject()")
-    }
-}
-
 impl Object for Blob {
+    fn pack(&self) -> Vec<u8> {
+        Vec::new()
+    }
+    fn compressed(&self) -> Vec<u8> {
+        Vec::new()
+    }
 }
 
 impl Object for Tree {
+    fn pack(&self) -> Vec<u8> {
+        Vec::new()
+    }
+    fn compressed(&self) -> Vec<u8> {
+        Vec::new()
+    }
 }
 
 impl Object for Commit {
+    fn pack(&self) -> Vec<u8> {
+        Vec::new()
+    }
+    fn compressed(&self) -> Vec<u8> {
+        Vec::new()
+    }
 }
 
 fn parse_blob(body: &[u8]) -> Result<Blob, String> {
@@ -250,26 +259,23 @@ fn parse_header(raw_header: &[u8]) -> Result<Header, String> {
     }
 }
 
-fn parse_object(raw: &[u8]) -> Result<FullObject, String> {
-    raw.iter().position(|&b| b == 0u8).ok_or(String::from("unable to find 0u8")).and_then(|l| {
-        parse_header(&raw[..l]).and_then(|h| {
-            let rb = &raw[l+1..];
+fn parse_object(obj: &[u8]) -> Result<Box<Object>, String> {
+    obj.iter().position(|&b| b == 0u8).ok_or(String::from("unable to find 0u8")).and_then(|l| {
+        parse_header(&obj[..l]).and_then(|h| {
+            let rb = &obj[l+1..];
             match h.typp {
-                Type::Blob => parse_blob(&rb).map(|b| FullObject{header:h, object:Box::new(b)}),
-                Type::Tree => parse_tree(&rb).map(|t| FullObject{header:h, object:Box::new(t)}),
-                Type::Commit => parse_commit(&rb).map(|c| FullObject{header:h, object:Box::new(c)}),
+                Type::Blob => parse_blob(&rb).map(|b| Box::new(b) as Box<Object>),
+                Type::Tree => parse_tree(&rb).map(|t| Box::new(t) as Box<Object>),
+                Type::Commit => parse_commit(&rb).map(|c| Box::new(c) as Box<Object>),
             }
         })
     })
 }
 
-pub fn deflate_and_parse_object(compressed: &[u8]) -> Result<(Hash,FullObject), String> {
-    let mut decoder = flate2::read::ZlibDecoder::new(&compressed[..]);
+pub fn parse(compressed: &[u8]) -> Result<(Hash,Box<Object>), String> {
     let mut deflated: Vec<u8> = Vec::new();
-    if let Err(e) = decoder.read_to_end(&mut deflated) {
-        return Err(String::from(e.to_string()));
+    match flate2::read::ZlibDecoder::new(compressed).read_to_end(&mut deflated) {
+        Ok(_) => parse_object(&deflated).map(|obj| (Hash::sum(&deflated), obj)),
+        Err(e) => Err(e.to_string()),
     }
-    parse_object(&deflated).map(|obj| {
-        (Hash::sum(&deflated), obj)
-    })
 }

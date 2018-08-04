@@ -10,9 +10,8 @@ fn is_valid_obj_sub_dir(dir: &Path) -> bool {
     return true
 }
 
-#[derive(Debug)]
 pub struct Repo {
-    objs: HashMap<object::Hash,object::FullObject>
+    objs: HashMap<object::Hash,Box<object::Object>>
 }
 
 impl Repo {
@@ -20,11 +19,11 @@ impl Repo {
         Repo {objs: HashMap::new()}
     }
 
-    pub fn add(&mut self, obj: object::FullObject) -> Result<(), String> {
+    pub fn add(&mut self, obj: Box<object::Object>) -> Result<(), String> {
         Err(String::from("NYI"))
     }
 
-    pub fn get(&self, hash: object::Hash) -> Option<&object::FullObject> {
+    pub fn get(&self, hash: object::Hash) -> Option<&Box<object::Object>> {
         self.objs.get(&hash)
     }
 
@@ -40,7 +39,7 @@ impl Repo {
                         if file_path.is_file() {
                             println!("parsing object {:?}", file_path);
                             let file_bytes = fs::read(file_path)?;
-                            match object::deflate_and_parse_object(&file_bytes) {
+                            match object::parse(&file_bytes) {
                                 Ok((sha, obj)) => {self.objs.insert(sha, obj);()},
                                 Err(e) => {println!("{:?}", e);()},
                             }
