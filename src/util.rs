@@ -16,3 +16,7 @@ pub fn decode(v: &[u8]) -> Result<Vec<u8>, String> {
     let mut decompressed = Vec::new();
     flate2::read::ZlibDecoder::new(v).read_to_end(&mut decompressed).map_err(|e| e.to_string()).map(|_| decompressed)
 }
+
+pub fn be_u32(v: &[u8]) -> u32 {
+    ((v[0] as u32) << 24) | ((v[1] as u32) << 16) | ((v[2] as u32) << 8) | ((v[3] as u32))
+}

@@ -1,13 +1,14 @@
 extern crate rustgit;
 
-use rustgit::repo;
 use rustgit::object;
+use rustgit::pack;
+use rustgit::repo;
 
 use std::path::Path;
 use std::fs;
 
 fn main() {
-    test_load();
+    test_idx();
 }
 
 fn test_load() {
@@ -22,6 +23,11 @@ fn test_single() {
     let obj = object::deflate(&f).unwrap();
     let hash = (*obj).hash().hex();
     fs::write(Path::new("./test_save_target/foo"), obj.encode().unwrap());
-    println!("path: {:?}", p);
-    println!("hash: {}", hash);
+}
+
+fn test_idx() {
+    let h = String::from("/Users/lingy/Uber/gocode/src/code.uber.internal/go-common.git/.git/objects/pack/pack-115b28b817f10363fddf1f0f9bd48d09ec703791");
+    let f_index = fs::read(&Path::new(&format!("{}{}", h, ".idx"))).unwrap();
+    let f_pack = fs::read(&Path::new(&format!("{}{}", h, ".pack"))).unwrap();
+    pack::parse_pack(&f_index, &f_pack).unwrap();
 }

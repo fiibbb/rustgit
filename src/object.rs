@@ -9,12 +9,12 @@ use std::str::from_utf8;
 
 #[derive(PartialEq, Eq, Hash)]
 pub struct Hash {
-    hash: [u8;20]
+    hash: [u8;20],
 }
 
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Hash {{ {:02x?} }}", self.hash)
+        write!(f, "Hash {{ {} }}", self.hex())
     }
 }
 
