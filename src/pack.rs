@@ -41,7 +41,7 @@ enum ObjType {
     OBJ_REF_DELTA,
 }
 
-fn parse_pack_obj_header(v: &[u8]) -> (ObjType, u32, usize) {
+fn parse_pack_obj_header(v: &[u8]) -> Result<(ObjType, u32, usize), String> {
     let obj_type = match (v[0] >> 4) & 0x7 {
         1 => ObjType::OBJ_COMMIT,
         2 => ObjType::OBJ_TREE,
@@ -49,7 +49,7 @@ fn parse_pack_obj_header(v: &[u8]) -> (ObjType, u32, usize) {
         4 => ObjType::OBJ_TAG,
         6 => ObjType::OBJ_OFS_DELTA,
         7 => ObjType::OBJ_REF_DELTA,
-        _ => panic!("invalid pack object type"),
+        _ => return Err(String::from("invalid pack object type")),
     };
     let mut obj_size = 0 as u32;
     obj_size |= (v[0] & 0xf) as u32;
@@ -58,7 +58,7 @@ fn parse_pack_obj_header(v: &[u8]) -> (ObjType, u32, usize) {
         i += 1;
         obj_size |= ((v[i] & 0x7f) as u32) << (4 + 7*(i-1));
     }
-    (obj_type, obj_size, i)
+    Ok((obj_type, obj_size, i+1))
 }
 
 pub fn parse_pack(index: &[u8], pack: &[u8]) -> Result<Vec<Box<Object>>, String> {
@@ -89,13 +89,21 @@ pub fn parse_pack(index: &[u8], pack: &[u8]) -> Result<Vec<Box<Object>>, String>
         }
     }
     offsets.sort_by(|a,b| a.0.cmp(&b.0));
+    let mut objs: Vec<Box<Object>> = Vec::new();
     for i in 0..offsets.len()-1 {
-        let raw_obj: &[u8] = &pack[(offsets[i].0 as usize)..(offsets[i+1].0 as usize)];
-        let (obj_type, obj_size, header_offset) = parse_pack_obj_header(raw_obj);
-        println!("seeing {:?} at {}: {:?} -- {:?}", offsets[i].1, offsets[i].0, obj_type, (obj_size, header_offset));
+        let (start, end) = (offsets[i].0 as usize, offsets[i+1].0 as usize);
+        let raw_obj: &[u8] = &pack[start..end];
+        let parse_res = parse_pack_obj_header(raw_obj).and_then(|(obj_type, obj_size, header_size)| {
+            println!("seeing {:?} at {}: {:?} -- {:?}", offsets[i].1, offsets[i].0, obj_type, (obj_size, header_size));
+            let compressed_obj = &pack[start+header_size..end];
+            deflate(compressed_obj)
+        });
+        match parse_res {
+            Ok(obj) => objs.push(obj),
+            Err(e) => return Err(e),
+        }
     }
-    // parse pack
-
+    // TODO: parse last object
     println!("obj_count: {}", index_obj_count);
-    Err(String::from("NYI"))
+    Ok(objs)
 }
