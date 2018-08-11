@@ -96,7 +96,12 @@ pub fn parse_pack(index: &[u8], pack: &[u8]) -> Result<Vec<Box<Object>>, String>
         let parse_res = parse_pack_obj_header(raw_obj).and_then(|(obj_type, obj_size, header_size)| {
             println!("seeing {:?} at {}: {:?} -- {:?}", offsets[i].1, offsets[i].0, obj_type, (obj_size, header_size));
             let compressed_obj = &pack[start+header_size..end];
-            deflate(compressed_obj)
+            match obj_type {
+                ObjType::OBJ_BLOB => decode(compressed_obj).and_then(|v| Blob::parse(&v)).map(|b| Box::new(b) as Box<Object>),
+                ObjType::OBJ_TREE => decode(compressed_obj).and_then(|v| Tree::parse(&v)).map(|t| Box::new(t) as Box<Object>),
+                ObjType::OBJ_COMMIT => decode(compressed_obj).and_then(|v| Commit::parse(&v)).map(|c| Box::new(c) as Box<Object>),
+                _ => panic!(format!("NYI: {:?}", obj_type)),
+            }
         });
         match parse_res {
             Ok(obj) => objs.push(obj),

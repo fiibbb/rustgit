@@ -138,7 +138,7 @@ impl Object for Commit {
 }
 
 impl Record {
-    fn parse(v: &[u8]) -> Result<Record, String> {
+    pub fn parse(v: &[u8]) -> Result<Record, String> {
         v.iter().position(|&b| b == b'<').ok_or(String::from("unable to locate <")).and_then(|l1| {
             v.iter().position(|&b| b == b'>').ok_or(String::from("unable to locate >")).and_then(|l2| {
                 utf8(&v[..l1-1]).and_then(|name| {
@@ -169,13 +169,13 @@ impl Record {
 }
 
 impl Blob {
-    fn parse(body: &[u8]) -> Result<Blob, String> {
+    pub fn parse(body: &[u8]) -> Result<Blob, String> {
         Ok(Blob{data: body.to_vec()})
     }
 }
 
 impl Tree {
-    fn parse(body: &[u8]) -> Result<Tree, String> {
+    pub fn parse(body: &[u8]) -> Result<Tree, String> {
         let mut tree_entries: Vec<TreeEntry> = Vec::new();
         let mut tail: &[u8] = body;
         while tail.len() > 0 {
@@ -209,7 +209,7 @@ impl Tree {
 }
 
 impl Commit {
-    fn parse(body: &[u8]) -> Result<Commit, String> {
+    pub fn parse(body: &[u8]) -> Result<Commit, String> {
         let mut tree_opt: Option<Hash> = None;
         let mut author_opt: Option<Record> = None;
         let mut committer_opt: Option<Record> = None;
