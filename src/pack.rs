@@ -1,8 +1,6 @@
 use util::*;
 use object::*;
 
-use std::collections::HashMap;
-
 const HSIZE: usize = 8; // header last bit
 const FSIZE: usize = 1032; // fanout table last bit, 1024 + HSIZE
 
@@ -33,6 +31,7 @@ impl Pack {
     }
 }
 
+#[derive(Debug)]
 enum ObjType {
     OBJ_COMMIT,
     OBJ_TREE,
@@ -42,32 +41,27 @@ enum ObjType {
     OBJ_REF_DELTA,
 }
 
-fn get_pack_obj_type(b: u8) -> ObjType {
-    match (b >> 4) & 0xf {
+fn parse_pack_obj_header(v: &[u8]) -> (ObjType, u32, usize) {
+    let obj_type = match (v[0] >> 4) & 0x7 {
         1 => ObjType::OBJ_COMMIT,
         2 => ObjType::OBJ_TREE,
         3 => ObjType::OBJ_BLOB,
         4 => ObjType::OBJ_TAG,
         6 => ObjType::OBJ_OFS_DELTA,
         7 => ObjType::OBJ_REF_DELTA,
-        _ => panic!("WTF")
-    }
-}
-
-fn get_pack_obj_size(v: &[u8]) -> u32 {
-    let mut offset = 0;
-    let mut result = 0 as u32;
-    result |= (v[0] & 0xf) as u32;
+        _ => panic!("invalid pack object type"),
+    };
+    let mut obj_size = 0 as u32;
+    obj_size |= (v[0] & 0xf) as u32;
     let mut i = 0;
     while v[i] & 0x80 != 0 {
         i += 1;
-        result |= (v[i] & 0x7f) as u32;
+        obj_size |= ((v[i] & 0x7f) as u32) << (4 + 7*(i-1));
     }
-    result
+    (obj_type, obj_size, i)
 }
 
 pub fn parse_pack(index: &[u8], pack: &[u8]) -> Result<Vec<Box<Object>>, String> {
-    // validation
     if be_u32(&index[4..8]) != 2 {
         return Err(format!("unexpected version number {}", be_u32(&index[4..8])));
     }
@@ -82,18 +76,23 @@ pub fn parse_pack(index: &[u8], pack: &[u8]) -> Result<Vec<Box<Object>>, String>
     if index_obj_count != pack_obj_count {
         return Err(format!("unmatched object count {} != {}", index_obj_count, pack_obj_count));
     }
-    // parse index
-    let mut hash2offset: HashMap<Hash, u32> = HashMap::new();
+    let mut offsets: Vec<(u32, Hash)> = Vec::new();
     let offset_table_start = 1032 + index_obj_count * 20 + index_obj_count * 4;
     for i in 0..index_obj_count {
         let (start, end) = (1032+i*20, 1032+(i+1)*20);
         let res = Hash::from(&index[start..end]).map(|hash| {
             let offset = be_u32(&index[i*4+offset_table_start..(i+1)*4+offset_table_start]);
-            hash2offset.insert(hash, offset);
+            offsets.push((offset, hash));
         });
         if let Err(e) = res {
             return Err(e);
         }
+    }
+    offsets.sort_by(|a,b| a.0.cmp(&b.0));
+    for i in 0..offsets.len()-1 {
+        let raw_obj: &[u8] = &pack[(offsets[i].0 as usize)..(offsets[i+1].0 as usize)];
+        let (obj_type, obj_size, header_offset) = parse_pack_obj_header(raw_obj);
+        println!("seeing {:?} at {}: {:?} -- {:?}", offsets[i].1, offsets[i].0, obj_type, (obj_size, header_offset));
     }
     // parse pack
 
