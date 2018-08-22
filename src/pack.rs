@@ -41,6 +41,17 @@ enum ObjType {
     OBJ_REF_DELTA,
 }
 
+pub trait Instruction {}
+
+pub struct CopyInstruction {
+    offset: u32,
+    length: u32,
+}
+
+pub struct InsertInstruction {
+
+}
+
 fn parse_pack_obj_header(v: &[u8]) -> Result<(ObjType, u32, usize), String> {
     let obj_type = match (v[0] >> 4) & 0x7 {
         1 => ObjType::OBJ_COMMIT,
@@ -59,6 +70,20 @@ fn parse_pack_obj_header(v: &[u8]) -> Result<(ObjType, u32, usize), String> {
         obj_size |= ((v[i] & 0x7f) as u32) << (4 + 7*(i-1));
     }
     Ok((obj_type, obj_size, i+1))
+}
+
+fn parse_ofs_delta_instruction(raw_ins: &[u8]) -> Result<Box<Instruction>, String> {
+
+}
+
+fn parse_ofs_delta(raw_delta: &[u8]) -> Result<Box<Object>, String> {
+    let (src_size, tail) = var_u32_tail(raw_delta);
+    let (dst_size, tail) = var_u32_tail(tail);
+    let mut obj: Vec<u8> = Vec::new();
+    while tail.len() > 0 {
+        let (raw_instruction, tail) = varint(tail);
+    }
+    Err(String::from("NYI"))
 }
 
 pub fn parse_pack(index: &[u8], pack: &[u8]) -> Result<Vec<Box<Object>>, String> {
@@ -100,6 +125,7 @@ pub fn parse_pack(index: &[u8], pack: &[u8]) -> Result<Vec<Box<Object>>, String>
                 ObjType::OBJ_BLOB => decode(compressed_obj).and_then(|v| Blob::parse(&v)).map(|b| Box::new(b) as Box<Object>),
                 ObjType::OBJ_TREE => decode(compressed_obj).and_then(|v| Tree::parse(&v)).map(|t| Box::new(t) as Box<Object>),
                 ObjType::OBJ_COMMIT => decode(compressed_obj).and_then(|v| Commit::parse(&v)).map(|c| Box::new(c) as Box<Object>),
+                ObjType::OBJ_OFS_DELTA => panic!(format!("seeing OFS delta with start {}, header_size {}, end {} : {:x?}", start, header_size, end, compressed_obj)),
                 _ => panic!(format!("NYI: {:?}", obj_type)),
             }
         });

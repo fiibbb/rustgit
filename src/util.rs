@@ -20,3 +20,32 @@ pub fn decode(v: &[u8]) -> Result<Vec<u8>, String> {
 pub fn be_u32(v: &[u8]) -> u32 {
     ((v[0] as u32) << 24) | ((v[1] as u32) << 16) | ((v[2] as u32) << 8) | ((v[3] as u32))
 }
+
+pub fn var_u32_tail(v: &[u8]) -> (u32, &[u8]) {
+    let mut res = (v[0] & 0x7f) as u32;
+    let mut i = 0;
+    while v[i] & 0x80 != 0 {
+        i += 1;
+        res |= ((v[i] & 0x7f) as u32) << (7 * i);
+    }
+    (res, &v[i+1..])
+}
+
+pub fn varint(v: &[u8]) -> (Vec<u8>, &[u8]) {
+    let mut res = Vec::new();
+    let mut i = 0;
+    while v[i] & 0x80 != 0 {
+        i += 1;
+        res.push(v[i] & 0x7f);
+    }
+    (res, &v[i+1..])
+}
+
+pub fn var_u32(v: &[u8]) -> u32 {
+    let mut res = 0 as u32;
+    let mut i = 0;
+    while i < v.len() {
+        res |= (v[i] as u32) << (7 * i);
+    }
+    res
+}
